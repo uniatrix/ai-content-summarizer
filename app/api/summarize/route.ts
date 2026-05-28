@@ -1,4 +1,8 @@
-import Groq from "groq-sdk";
+import {
+  FunctionCallingConfigMode,
+  GoogleGenAI,
+  type FunctionDeclaration,
+} from "@google/genai";
 import { NextRequest, NextResponse } from "next/server";
 import { prepareInput } from "@/lib/extract";
 import { rateLimit } from "@/lib/rate-limit";
@@ -6,41 +10,43 @@ import { rateLimit } from "@/lib/rate-limit";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-// Groq's free tier — no credit card needed. Llama 3.3 70B is fast and
-// supports tool/function calling, which we use for reliable structured output.
-const MODEL = "llama-3.3-70b-versatile";
+// Google Gemini free tier — no credit card required. Fast Flash model that
+// supports function calling, which gives us reliable structured JSON output.
+const MODEL = "gemini-2.5-flash";
 const MAX_OUTPUT_TOKENS = 1024;
 
-const SUMMARY_TOOL = {
-  type: "function" as const,
-  function: {
-    name: "format_summary",
-    description: "Return a structured summary of the provided content.",
-    parameters: {
-      type: "object",
-      properties: {
-        title: { type: "string", description: "A short, descriptive title." },
-        tldr: { type: "string", description: "One or two sentence takeaway." },
-        key_points: {
-          type: "array",
-          items: { type: "string" },
-          description: "3 to 7 of the most important points.",
-        },
-        topics: {
-          type: "array",
-          items: { type: "string" },
-          description: "Up to 6 short topic/keyword tags.",
-        },
-        sentiment: {
-          type: "string",
-          enum: ["positive", "neutral", "negative", "mixed"],
-          description: "Overall tone of the content.",
-        },
+const SUMMARY_FUNCTION: FunctionDeclaration = {
+  name: "format_summary",
+  description: "Return a structured summary of the provided content.",
+  parametersJsonSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "A short, descriptive title." },
+      tldr: { type: "string", description: "One or two sentence takeaway." },
+      key_points: {
+        type: "array",
+        items: { type: "string" },
+        description: "3 to 7 of the most important points.",
       },
-      required: ["title", "tldr", "key_points", "topics", "sentiment"],
+      topics: {
+        type: "array",
+        items: { type: "string" },
+        description: "Up to 6 short topic/keyword tags.",
+      },
+      sentiment: {
+        type: "string",
+        enum: ["positive", "neutral", "negative", "mixed"],
+        description: "Overall tone of the content.",
+      },
     },
+    required: ["title", "tldr", "key_points", "topics", "sentiment"],
   },
 };
+
+const SYSTEM_INSTRUCTION =
+  "You are an expert analyst. You read content and produce a concise, " +
+  "faithful, structured summary. Never invent facts that are not in the " +
+  "source. Always respond by calling the format_summary function.";
 
 function clientIp(req: NextRequest): string {
   const fwd = req.headers.get("x-forwarded-for");
@@ -48,10 +54,10 @@ function clientIp(req: NextRequest): string {
 }
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Server is missing GROQ_API_KEY." },
+      { error: "Server is missing GEMINI_API_KEY." },
       { status: 500 },
     );
   }
@@ -96,49 +102,35 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const client = new Groq({ apiKey });
+  const ai = new GoogleGenAI({ apiKey });
 
   try {
-    const completion = await client.chat.completions.create({
+    const response = await ai.models.generateContent({
       model: MODEL,
-      max_tokens: MAX_OUTPUT_TOKENS,
-      tools: [SUMMARY_TOOL],
-      tool_choice: { type: "function", function: { name: "format_summary" } },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an expert analyst. You read content and produce a concise, " +
-            "faithful, structured summary. Never invent facts that are not in the " +
-            "source. Always respond by calling the format_summary tool.",
+      contents: `Summarize the following ${prepared.sourceType === "url" ? "web page" : "text"}:\n\n${prepared.text}`,
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        tools: [{ functionDeclarations: [SUMMARY_FUNCTION] }],
+        toolConfig: {
+          functionCallingConfig: {
+            mode: FunctionCallingConfigMode.ANY,
+            allowedFunctionNames: ["format_summary"],
+          },
         },
-        {
-          role: "user",
-          content: `Summarize the following ${prepared.sourceType === "url" ? "web page" : "text"}:\n\n${prepared.text}`,
-        },
-      ],
+      },
     });
 
-    const toolCall = completion.choices[0]?.message?.tool_calls?.[0];
-    if (!toolCall || toolCall.function.name !== "format_summary") {
+    const call = response.functionCalls?.[0];
+    if (!call || call.name !== "format_summary" || !call.args) {
       return NextResponse.json(
         { error: "The model did not return a structured summary." },
         { status: 502 },
       );
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(toolCall.function.arguments);
-    } catch {
-      return NextResponse.json(
-        { error: "The model returned malformed structured output." },
-        { status: 502 },
-      );
-    }
-
     return NextResponse.json({
-      summary: parsed,
+      summary: call.args,
       meta: {
         source_type: prepared.sourceType,
         truncated: prepared.truncated,

@@ -59,8 +59,8 @@ export default function Page() {
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-neutral-400">
           Paste a URL or any text and get a clean, structured summary — TL;DR,
-          key points, topics, and sentiment. Powered by Llama 3.3 70B (via
-          Groq), with page fetching and text extraction handled server-side.
+          key points, topics, and sentiment. Powered by Google Gemini, with
+          page fetching and text extraction handled server-side.
         </p>
       </header>
 
@@ -149,9 +149,8 @@ export default function Page() {
       )}
 
       <footer className="mt-12 border-t border-neutral-900 pt-6 text-xs text-neutral-600">
-        Built by Cesar Seabra · Next.js + Groq (Llama 3.3 70B) · structured
-        output via function calling, server-side URL fetching, and rate
-        limiting.
+        Built by Cesar Seabra · Next.js + Google Gemini · structured output
+        via function calling, server-side URL fetching, and rate limiting.
       </footer>
     </main>
   );
