@@ -2,7 +2,7 @@
   "name": "ai-content-summarizer",
   "version": "1.0.0",
   "private": true,
-  "description": "Paste a URL or text and get a structured summary, powered by Claude.",
+  "description": "Paste a URL or text and get a structured summary, powered by Llama 3.3 70B via Groq (free tier).",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,7 +10,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "groq-sdk": "^0.20.1",
     "next": "^15.5.18",
     "react": "19.0.0",
     "react-dom": "19.0.0"
